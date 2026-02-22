@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  cf-ip-optimizer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: cf-ip-optimizer:latest
+    container_name: cf-ip-optimizer
+    restart: unless-stopped
+
+    environment:
+      - CF_API_TOKEN=${CF_API_TOKEN}
+      - CF_ACCOUNT_ID=${CF_ACCOUNT_ID}
+      - KV_NAMESPACE_ID=${KV_NAMESPACE_ID}
+      - WORKER_URL=${WORKER_URL}
+
+    volumes:
+      - ./logs:/var/log/cf-optimizer
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

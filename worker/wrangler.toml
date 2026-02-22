@@ -1,0 +1,28 @@
+name = "leex-ip-optimizer"
+main = "src/index.js"
+compatibility_date = "2024-01-01"
+
+# KV Namespace binding
+# Run: wrangler kv:namespace create CF_IP_OPTIMIZER
+# Then update the id below
+[[kv_namespaces]]
+binding = "KV"
+id = "67cbf15db6d74ec8a7674030fd348720"
+
+[vars]
+ENVIRONMENT = "production"
+
+[observability]
+enabled = false
+head_sampling_rate = 1
+
+[observability.logs]
+enabled = true
+head_sampling_rate = 1
+persist = true
+invocation_logs = true
+
+[observability.traces]
+enabled = false
+persist = true
+head_sampling_rate = 1
