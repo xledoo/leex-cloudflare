@@ -18,7 +18,7 @@ const args = process.argv.slice(2).reduce((acc, arg) => {
 
 // Default configuration
 const DEFAULT_CLIENT_ID = 'home-nas';
-const DEFAULT_TOKEN = 'change_me_to_secret_token';
+const DEFAULT_TOKEN = 'YOUR_SECRET_TOKEN_HERE';
 
 const rl = readline.createInterface({
   input: process.stdin,
