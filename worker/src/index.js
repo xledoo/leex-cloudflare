@@ -1,9 +1,8 @@
 /**
  * CF IP Optimizer Worker
- * Provides API endpoints for reading IP optimization results
+ * Multi-instance support with client_id isolation
  */
 
-// Default configuration
 const DEFAULT_CONFIG = {
   interval: 3600,
   testCount: 1000,
@@ -14,24 +13,19 @@ const DEFAULT_CONFIG = {
   ipVersion: "both"
 };
 
-// CORS headers
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization",
   "Content-Type": "application/json; charset=utf-8"
 };
 
-// Text response headers
 const textHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, OPTIONS",
   "Content-Type": "text/plain; charset=utf-8"
 };
 
-/**
- * Handle OPTIONS request for CORS
- */
 function handleOptions() {
   return new Response(null, {
     status: 204,
@@ -39,9 +33,6 @@ function handleOptions() {
   });
 }
 
-/**
- * Return JSON response
- */
 function jsonResponse(data, status = 200) {
   return new Response(JSON.stringify(data, null, 2), {
     status,
@@ -49,9 +40,6 @@ function jsonResponse(data, status = 200) {
   });
 }
 
-/**
- * Return text response
- */
 function textResponse(text, status = 200) {
   return new Response(text, {
     status,
@@ -59,87 +47,160 @@ function textResponse(text, status = 200) {
   });
 }
 
-/**
- * GET /api/ips - Return IPs as plain text (ip:port per line)
- */
-async function getIpsText(KV) {
-  const result = await KV.get("result", { type: "json" });
+function getInstanceKey(clientId) {
+  return `instance:${clientId}`;
+}
+
+function getResultKey(clientId) {
+  return `result:${clientId}`;
+}
+
+function getConfigKey(clientId) {
+  return `config:${clientId}`;
+}
+
+async function validateToken(KV, clientId, token) {
+  if (!clientId || !token) {
+    return { valid: false, error: "Missing client_id or token" };
+  }
+
+  const instanceKey = getInstanceKey(clientId);
+  const instance = await KV.get(instanceKey, { type: "json" });
+
+  if (!instance) {
+    return { valid: false, error: "Instance not registered" };
+  }
+
+  if (instance.token !== token) {
+    return { valid: false, error: "Invalid token" };
+  }
+
+  return { valid: true };
+}
+
+async function handleReport(request, env) {
+  try {
+    const body = await request.json();
+    const { client_id, token, data } = body;
+
+    if (!client_id || !token) {
+      return jsonResponse({ error: "Missing client_id or token" }, 400);
+    }
+
+    const validation = await validateToken(env.KV, client_id, token);
+    if (!validation.valid) {
+      return jsonResponse({ error: validation.error }, 401);
+    }
+
+    if (!data) {
+      return jsonResponse({ error: "Missing data" }, 400);
+    }
+
+    const resultKey = getResultKey(client_id);
+    await env.KV.put(resultKey, JSON.stringify({
+      ...data,
+      clientId: client_id,
+      lastUpdated: new Date().toISOString()
+    }));
+
+    const instanceKey = getInstanceKey(client_id);
+    const instance = await env.KV.get(instanceKey, { type: "json" }) || {};
+    await env.KV.put(instanceKey, JSON.stringify({
+      ...instance,
+      lastSeen: new Date().toISOString()
+    }));
+
+    return jsonResponse({ success: true, message: "Results uploaded" });
+  } catch (e) {
+    return jsonResponse({ error: "Invalid request body" }, 400);
+  }
+}
+
+async function getIpsText(KV, clientId) {
+  if (!clientId) {
+    return textResponse("# Error: client_id parameter required\n", 400);
+  }
+
+  const resultKey = getResultKey(clientId);
+  const result = await KV.get(resultKey, { type: "json" });
 
   if (!result || !result.ips || result.ips.length === 0) {
-    return textResponse("# No optimized IPs available yet\n");
+    return textResponse(`# No optimized IPs available for instance: ${clientId}\n`);
   }
 
   const lines = result.ips.map(ip => `${ip.ip}:${ip.port}`);
   return textResponse(lines.join("\n"));
 }
 
-/**
- * GET /api/ips/json - Return full result as JSON
- */
-async function getIpsJson(KV) {
-  const result = await KV.get("result", { type: "json" });
+async function getIpsJson(KV, clientId) {
+  if (!clientId) {
+    return jsonResponse({ error: "client_id parameter required" }, 400);
+  }
+
+  const resultKey = getResultKey(clientId);
+  const result = await KV.get(resultKey, { type: "json" });
 
   if (!result) {
     return jsonResponse({
+      clientId: clientId,
       lastUpdated: null,
       ips: [],
-      error: "No results available yet. Wait for the optimizer to run."
+      error: `No results available for instance: ${clientId}`
     });
   }
 
   return jsonResponse(result);
 }
 
-/**
- * GET /api/ips/conf - Return configuration
- */
-async function getConfig(KV) {
-  const config = await KV.get("config", { type: "json" });
+async function getConfig(KV, clientId) {
+  if (!clientId) {
+    return jsonResponse({ error: "client_id parameter required" }, 400);
+  }
+
+  const configKey = getConfigKey(clientId);
+  const config = await KV.get(configKey, { type: "json" });
 
   if (!config) {
     return jsonResponse(DEFAULT_CONFIG);
   }
 
-  // Merge with defaults for any missing fields
-  return jsonResponse({
-    ...DEFAULT_CONFIG,
-    ...config
-  });
+  return jsonResponse({ ...DEFAULT_CONFIG, ...config });
 }
 
-/**
- * Main request handler
- */
 async function handleRequest(request, env) {
   const url = new URL(request.url);
   const path = url.pathname;
+  const clientId = url.searchParams.get("client_id");
 
-  // Handle CORS preflight
   if (request.method === "OPTIONS") {
     return handleOptions();
   }
 
-  // Route requests
+  if (request.method === "POST" && path === "/api/report") {
+    return handleReport(request, env);
+  }
+
   if (request.method === "GET") {
     switch (path) {
       case "/api/ips":
-        return getIpsText(env.KV);
+        return getIpsText(env.KV, clientId);
 
       case "/api/ips/json":
-        return getIpsJson(env.KV);
+        return getIpsJson(env.KV, clientId);
 
       case "/api/ips/conf":
-        return getConfig(env.KV);
+        return getConfig(env.KV, clientId);
 
       case "/":
       case "/health":
         return jsonResponse({
           name: "CF IP Optimizer API",
-          version: "1.0.0",
+          version: "2.0.0",
           endpoints: [
-            "GET /api/ips - Plain text IP list (ip:port per line)",
-            "GET /api/ips/json - Full result with latency and speed",
-            "GET /api/ips/conf - Current optimization configuration"
+            "POST /api/report - Upload results (requires client_id, token in body)",
+            "GET /api/ips?client_id=xxx - Plain text IP list",
+            "GET /api/ips/json?client_id=xxx - Full result JSON",
+            "GET /api/ips/conf?client_id=xxx - Instance configuration"
           ]
         });
 
@@ -151,7 +212,6 @@ async function handleRequest(request, env) {
   return jsonResponse({ error: "Method not allowed" }, 405);
 }
 
-// Export for Cloudflare Workers
 export default {
   async fetch(request, env, ctx) {
     return handleRequest(request, env);

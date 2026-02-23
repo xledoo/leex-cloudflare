@@ -4,20 +4,18 @@
 set -e
 
 # Validate required environment variables
-: "${CF_API_TOKEN:?CF_API_TOKEN is required}"
-: "${CF_ACCOUNT_ID:?CF_ACCOUNT_ID is required}"
-: "${KV_NAMESPACE_ID:?KV_NAMESPACE_ID is required}"
+: "${CLIENT_ID:?CLIENT_ID is required}"
+: "${TOKEN:?TOKEN is required}"
 : "${WORKER_URL:?WORKER_URL is required}"
 
 # Export for sub-scripts
-export CF_API_TOKEN CF_ACCOUNT_ID KV_NAMESPACE_ID WORKER_URL
+export CLIENT_ID TOKEN WORKER_URL
 
 # Create log directory
 mkdir -p /var/log/cf-optimizer
 
 echo "CF IP Optimizer container starting..."
-echo "  CF Account: ${CF_ACCOUNT_ID}"
-echo "  KV Namespace: ${KV_NAMESPACE_ID}"
+echo "  Client ID: ${CLIENT_ID}"
 echo "  Worker URL: ${WORKER_URL}"
 
 # Start optimizer

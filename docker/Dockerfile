@@ -1,7 +1,7 @@
 # CF IP Optimizer Docker Image
 # Build: docker build -t cf-ip-optimizer:latest -f docker/Dockerfile .
 
-FROM alpine:3.19
+FROM docker.1ms.run/alpine:latest
 
 LABEL maintainer="CF IP Optimizer"
 LABEL description="Automatic Cloudflare IP optimizer with KV storage"

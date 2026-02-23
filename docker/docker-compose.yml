@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   cf-ip-optimizer:
     build:
@@ -10,10 +8,9 @@ services:
     restart: unless-stopped
 
     environment:
-      - CF_API_TOKEN=${CF_API_TOKEN}
-      - CF_ACCOUNT_ID=${CF_ACCOUNT_ID}
-      - KV_NAMESPACE_ID=${KV_NAMESPACE_ID}
-      - WORKER_URL=${WORKER_URL}
+      - CLIENT_ID=home-nas
+      - TOKEN=your_secret_token_here
+      - WORKER_URL=https://ip-optimizer.meleex.cn
 
     volumes:
       - ./logs:/var/log/cf-optimizer
