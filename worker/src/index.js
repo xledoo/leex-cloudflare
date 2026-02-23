@@ -5,10 +5,10 @@
 
 const DEFAULT_CONFIG = {
   interval: 3600,
-  testCount: 1000,
-  downloadCount: 50,
+  testCount: 500,
+  downloadCount: 100,
   latencyMax: 200,
-  downloadMin: 5,
+  downloadMin: 10,
   ports: [443],
   ipVersion: "both"
 };
@@ -57,6 +57,48 @@ function getResultKey(clientId) {
 
 function getConfigKey(clientId) {
   return `config:${clientId}`;
+}
+
+function getSubmitIpsToKey(clientId) {
+  return `submit_ips_to:${clientId}`;
+}
+
+async function getSubmitIpsToUrl(KV, clientId) {
+  const key = getSubmitIpsToKey(clientId);
+  const url = await KV.get(key);
+  return url || null;
+}
+
+async function submitIpsToApi(ips, submitUrl, clientId) {
+  if (!submitUrl || !ips || ips.length === 0) {
+    return { success: false, reason: "No URL or IPs" };
+  }
+
+  const payload = ips.map(ip => ({
+    ip: ip.ip,
+    port: ip.port || 443,
+    name: ip.name || ip.remark || `优选-${ip.ip}`
+  }));
+
+  try {
+    const response = await fetch(`${submitUrl}/api/preferred-ips`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(payload)
+    });
+
+    if (response.ok) {
+      const result = await response.json();
+      return { success: true, count: payload.length, response: result };
+    } else {
+      const errorText = await response.text();
+      return { success: false, status: response.status, error: errorText };
+    }
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
 }
 
 async function validateToken(KV, clientId, token) {
@@ -110,7 +152,20 @@ async function handleReport(request, env) {
       lastSeen: new Date().toISOString()
     }));
 
-    return jsonResponse({ success: true, message: "Results uploaded" });
+    let submitResult = null;
+    if (data.ips && data.ips.length > 0) {
+      const submitUrl = await getSubmitIpsToUrl(env.KV, client_id);
+      if (submitUrl) {
+        submitResult = await submitIpsToApi(data.ips, submitUrl, client_id);
+      }
+    }
+
+    const response = { success: true, message: "Results uploaded" };
+    if (submitResult) {
+      response.submitted = submitResult;
+    }
+
+    return jsonResponse(response);
   } catch (e) {
     return jsonResponse({ error: "Invalid request body" }, 400);
   }
@@ -167,6 +222,33 @@ async function getConfig(KV, clientId) {
   return jsonResponse({ ...DEFAULT_CONFIG, ...config });
 }
 
+async function getSubmitConfig(KV, clientId) {
+  if (!clientId) {
+    return jsonResponse({ error: "client_id parameter required" }, 400);
+  }
+
+  const submitUrl = await getSubmitIpsToUrl(KV, clientId);
+  return jsonResponse({
+    client_id: clientId,
+    submit_ips_to: submitUrl || ""
+  });
+}
+
+async function setSubmitConfig(KV, clientId, submitUrl) {
+  if (!clientId) {
+    return jsonResponse({ error: "client_id parameter required" }, 400);
+  }
+
+  const key = getSubmitIpsToKey(clientId);
+  if (submitUrl && submitUrl.trim()) {
+    await KV.put(key, submitUrl.trim());
+    return jsonResponse({ success: true, message: "submit_ips_to configured", submit_ips_to: submitUrl.trim() });
+  } else {
+    await KV.delete(key);
+    return jsonResponse({ success: true, message: "submit_ips_to cleared" });
+  }
+}
+
 async function handleRequest(request, env) {
   const url = new URL(request.url);
   const path = url.pathname;
@@ -180,6 +262,15 @@ async function handleRequest(request, env) {
     return handleReport(request, env);
   }
 
+  if (request.method === "POST" && path === "/api/submit-to") {
+    try {
+      const body = await request.json();
+      return setSubmitConfig(env.KV, body.client_id, body.submit_ips_to);
+    } catch (e) {
+      return jsonResponse({ error: "Invalid request body" }, 400);
+    }
+  }
+
   if (request.method === "GET") {
     switch (path) {
       case "/api/ips":
@@ -191,16 +282,21 @@ async function handleRequest(request, env) {
       case "/api/ips/conf":
         return getConfig(env.KV, clientId);
 
+      case "/api/submit-to":
+        return getSubmitConfig(env.KV, clientId);
+
       case "/":
       case "/health":
         return jsonResponse({
           name: "CF IP Optimizer API",
-          version: "2.0.0",
+          version: "2.1.0",
           endpoints: [
             "POST /api/report - Upload results (requires client_id, token in body)",
             "GET /api/ips?client_id=xxx - Plain text IP list",
             "GET /api/ips/json?client_id=xxx - Full result JSON",
-            "GET /api/ips/conf?client_id=xxx - Instance configuration"
+            "GET /api/ips/conf?client_id=xxx - Instance configuration",
+            "GET /api/submit-to?client_id=xxx - Get submit_ips_to URL",
+            "POST /api/submit-to - Set submit_ips_to URL (body: {client_id, submit_ips_to})"
           ]
         });
 

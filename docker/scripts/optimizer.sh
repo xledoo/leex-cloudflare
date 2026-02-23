@@ -78,13 +78,34 @@ main_loop() {
         IPS_TEMP_FILE="/tmp/ips_json_parts.txt"
         > "$IPS_TEMP_FILE"
 
+        # 优先使用外部IP源，失败则随机生成
+        IP_SOURCE_FILE="/tmp/ip_source.txt"
+        
+        log "Fetching IP source from wetest.vip..."
+        FETCHED=0
+        
+        # 从wetest.vip解析优选IP (兼容POSIX shell)
+        if curl -s --max-time 30 "https://www.wetest.vip/page/cloudflare/address_v4.html" -o /tmp/wetest.html 2>/dev/null; then
+            # 提取优选地址列中的IP
+            sed -n 's/.*data-label="优选地址">\([0-9.]*\).*/\1/p' /tmp/wetest.html > "$IP_SOURCE_FILE" 2>/dev/null
+            if [ -s "$IP_SOURCE_FILE" ]; then
+                FETCHED=1
+                IP_COUNT=$(wc -l < "$IP_SOURCE_FILE")
+                log "Fetched $IP_COUNT IPs from wetest.vip"
+            fi
+        fi
+        
+        if [ $FETCHED -eq 0 ]; then
+            log "Warning: Failed to fetch external IP source, using random generation"
+            /opt/cf-optimizer/generate_ips.sh "$TEST_COUNT" "$IP_VERSION" > "$IP_SOURCE_FILE"
+        fi
+        
+        IP_FILE="$IP_SOURCE_FILE"
+
         for PORT in $PORTS; do
             RESULT_FILE="/tmp/result_${PORT}.csv"
 
             log "Testing port ${PORT}..."
-
-            IP_FILE="/tmp/test_ips_${PORT}.txt"
-            /opt/cf-optimizer/generate_ips.sh "$TEST_COUNT" "$IP_VERSION" > "$IP_FILE"
 
             $CFST_BIN \
                 -f "$IP_FILE" \
@@ -92,7 +113,8 @@ main_loop() {
                 -dn "$DOWNLOAD_COUNT" \
                 -tl "$LATENCY_MAX" \
                 -sl "$DOWNLOAD_MIN" \
-                -p 0 \
+                -p 10 \
+                -url "https://cftest.speedtestcustom.com/__down?measId=123" \
                 -o "$RESULT_FILE" 2>/dev/null
 
             if [ -f "$RESULT_FILE" ]; then
