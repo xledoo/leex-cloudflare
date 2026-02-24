@@ -5867,18 +5867,6 @@
             });
         }
         
-        const ae = getConfigValue('ae', '') === 'yes';
-        if (!ae) {
-            return new Response(JSON.stringify({
-                success: false,
-                error: 'API功能未启用',
-                message: '出于安全考虑，优选IP API功能默认关闭。请在配置管理页面开启"允许API管理"选项后使用。'
-            }), {
-                status: 403,
-                headers: { 'Content-Type': 'application/json' }
-            });
-        }
-        
         try {
             if (request.method === 'GET') {
                 
@@ -5897,9 +5885,9 @@
                 
                 const body = await request.json();
                 
-                const ipsToAdd = Array.isArray(body) ? body : [body];
+                const ipsToSet = Array.isArray(body) ? body : [body];
                 
-                if (ipsToAdd.length === 0) {
+                if (ipsToSet.length === 0) {
                     return new Response(JSON.stringify({
                         success: false,
                         error: '请求数据为空',
@@ -5910,14 +5898,11 @@
                     });
                 }
                 
-                const yxValue = getConfigValue('yx', '');
-                let pi = parseYxToArray(yxValue);
-                
-                const addedIPs = [];
-                const skippedIPs = [];
+                const newIPs = [];
                 const errors = [];
+                const seenIPs = new Set();
                 
-                for (const item of ipsToAdd) {
+                for (const item of ipsToSet) {
                     
                     if (!item.ip) {
                         errors.push({ ip: '未知', reason: 'IP地址是必需的' });
@@ -5926,47 +5911,39 @@
                     
                     const port = item.port || 443;
                     const name = item.name || `API优选-${item.ip}:${port}`;
+                    const ipKey = `${item.ip}:${port}`;
                     
                     if (!isValidIP(item.ip) && !isValidDomain(item.ip)) {
                         errors.push({ ip: item.ip, reason: '无效的IP或域名格式' });
                         continue;
                     }
                     
-                    const exists = pi.some(existItem => 
-                        existItem.ip === item.ip && existItem.port === port
-                    );
-                    
-                    if (exists) {
-                        skippedIPs.push({ ip: item.ip, port: port, reason: '已存在' });
+                    if (seenIPs.has(ipKey)) {
                         continue;
                     }
+                    seenIPs.add(ipKey);
                     
-                    const newIP = {
+                    newIPs.push({
                         ip: item.ip,
                         port: port,
                         name: name,
                         addedAt: new Date().toISOString()
-                    };
-                    
-                    pi.push(newIP);
-                    addedIPs.push(newIP);
+                    });
                 }
                 
-                if (addedIPs.length > 0) {
-                    const newYxValue = arrayToYx(pi);
+                if (newIPs.length > 0) {
+                    const newYxValue = arrayToYx(newIPs);
                     await setConfigValue('yx', newYxValue);
                     updateCustomPreferredFromYx();
                 }
                 
                 return new Response(JSON.stringify({
-                    success: addedIPs.length > 0,
-                    message: `成功添加 ${addedIPs.length} 个IP`,
-                    added: addedIPs.length,
-                    skipped: skippedIPs.length,
+                    success: newIPs.length > 0,
+                    message: `成功替换为 ${newIPs.length} 个IP`,
+                    replaced: newIPs.length,
                     errors: errors.length,
                     data: {
-                        addedIPs: addedIPs,
-                        skippedIPs: skippedIPs.length > 0 ? skippedIPs : undefined,
+                        ips: newIPs,
                         errors: errors.length > 0 ? errors : undefined
                     }
                 }), {
